@@ -1,0 +1,335 @@
+---
+title: "draft_models"
+author: "abbey yatsko"
+date: "2023-04-18"
+output: html_document
+---
+
+libraries
+```{r}
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(tidyverse)
+library(ggpubr)
+library(lme4)
+library(easystats)
+library(multcompView)
+library(ggeffects)
+library(nlme)
+library(stats)
+library(car)
+library(ggpmisc)
+library(glmmTMB)
+library(patchwork)
+library(BIOMASS)
+```
+
+data load 
+```{r}
+load("/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/tree_level_damage_myrt.RData")
+load("/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/myrt.RData")
+
+agb <- read.csv("/Users/abbeyyatsko/Desktop/repos/residrill_MS/data/site_agb.csv")
+pnw_stems <- read.csv("/Users/abbeyyatsko/Desktop/repos/residrill_MS/data/pnw_biomass.csv")
+```
+
+Figure 2 
+```{r}
+# a. relationship between proportion damage and height in tree
+glmmtb <- glmmTMB(linear_mean ~ drill_height_cm + dbh_cm.x + species + (1|tree_site_ID), myrt, family=list(family="beta",link="logit"))
+summary(glmmtb)
+check_model(glmmtb)
+Anova(glmmtb)
+
+prop <- ggpredict(glmmtb, terms = c("species")) 
+plot(prop)+
+   labs(x = "Species", y = "Damage", title = "Predicted proportion damage") # need to turn this into a finalized fig...
+
+a <- ggplot(myrt, aes(x = species, y = linear_mean, color = species)) + 
+  geom_boxplot() +
+  theme_classic() + 
+  xlab("") + 
+  ylab("Proportion damaged area")
+
+# b. relationship between area damage and height in tree
+# define area of slice 1cm thick at each measurement point 
+myrt$V_xsection_cm3 <- ((myrt$drill_dbh_cm/2)^2)*(pi)*(1)
+myrt$V_xsection_cm3_damaged <- myrt$V_xsection_cm3 * myrt$linear_mean
+
+mixed.M1 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + dbh_cm.x + (1|tree_site_ID), REML = F, data = myrt)
+summary(mixed.M1)
+Anova(mixed.M1)
+check_model(mixed.M1)
+
+v <- c(10, 25, 34)
+area <- ggpredict(mixed.M1, terms = c("drill_height_cm [all]", "dbh_cm.x [v]"), back.transform = TRUE)  #%>% plot(add.data = TRUE)
+low <- "#364B9A"
+mid <- '#F99858'
+high <- '#A50026'
+
+b <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = dbh_cm.x)) + 
+  geom_jitter() +
+  facet_wrap(~species) +
+  scale_colour_gradient2(low=low, mid=mid, midpoint = 30 , high=high, name ='DBH') +
+  geom_line(aes(x=x, y=predicted), data=filter(area, group=='10'), 
+            inherit.aes=FALSE, colour= low) + 
+  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='10'), 
+              inherit.aes=FALSE,  alpha=0.2, fill = low) +
+  geom_line(aes(x=x, y=predicted), data=filter(area, group =='25'), 
+            inherit.aes=FALSE, colour= mid) + 
+  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='25'), 
+              inherit.aes=FALSE,  alpha=0.2, fill = mid)+
+  geom_line(aes(x=x, y=predicted), data=filter(area, group =='34'), 
+            inherit.aes=FALSE, colour= high) + 
+  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='34'), 
+              inherit.aes=FALSE,  alpha=0.2, fill = high)+
+  theme_classic() + 
+  xlab("Drill height (cm)") + 
+  ylab("Absolute damaged area")
+
+# c. area damage contrasted with species boxplots 
+area <- ggpredict(mixed.M1, terms = c("species")) 
+plot(area)+
+   labs(x = "Species", y = "Damage (cm2)", title = "Predicted absoute area damage") 
+
+a+b + patchwork::plot_annotation(tag_levels = "a")
+```
+
+Figure 3 
+Tapering - volume damaged using frustrum 
+```{r}
+# generate list of all trees 
+ids <- unique(myrt$tree_site_ID)
+
+# function that calculates undamaged frustrum volume 
+frus_ud <- function(x){
+  ID <- unique(x$tree_site_ID)
+  d1 <- min(x$drill_height_cm) 
+  d4 <- max(x$drill_height_cm)
+  L <- d4 - d1
+  A1 <- x$V_xsection_cm3[x$drill_height_cm == d1]
+  A4 <- x$V_xsection_cm3[x$drill_height_cm == d4]
+  V <- (L/3) * (A1 + sqrt(A1 * A4) + A4)
+  
+  output <- data.frame(tree_site_ID = ID, frus_undamage_cm3 = V)
+  return(output)
+}
+
+# function that calculates damaged frustrum volume 
+frus_d <- function(x){
+  ID <- unique(x$tree_site_ID)
+  d1 <- min(x$drill_height_cm) 
+  d4 <- max(x$drill_height_cm)
+  L <- d4 - d1
+  A1 <- x$V_xsection_cm3_damaged[x$drill_height_cm == d1]
+  A4 <- x$V_xsection_cm3_damaged[x$drill_height_cm == d4]
+  V <- (L/3) * (A1 + sqrt(A1 * A4) + A4)
+  
+  output <- data.frame(tree_site_ID = ID, frus_damage_cm3 = V)
+  return(output)
+}
+
+# calculate volume of undamaged frustrum for each tree 
+frus_v <- lapply(ids, function(id) frus_ud(myrt[myrt$tree_site_ID == id, ]))
+frus_v_out <- do.call(rbind, frus_v)  
+
+# calculate volume of damaged frustrum for each tree 
+frus_v_d <- lapply(ids, function(id) frus_d(myrt[myrt$tree_site_ID == id, ]))
+frus_v_d_out <- do.call(rbind, frus_v_d)  
+
+# merge frustrum volume estimates for damaged and undamaged 
+frustrum <- merge(frus_v_out, frus_v_d_out, by = "tree_site_ID")
+
+# calculate biomass using wood density
+info <- tree_level_damage_myrt[, c("tree_site_ID", "species", "wd", "dbh_cm", "site")]
+frustrum <- merge(info, frustrum, by = "tree_site_ID")
+
+# MULTIPOINT damage estimate
+frustrum$undamaged_kg <- (frustrum$wd * frustrum$frus_undamage_cm3)/1000
+frustrum$mp_damaged_kg <- (frustrum$wd * frustrum$frus_damage_cm3)/1000
+
+# SINGLEPOINT damage estimate (from residrill closest to DBH_)
+dbh_resi <- myrt[myrt$drill_height_cm > 113 & myrt$drill_height_cm < 136, ]
+missing_elements <- ids[!ids %in% dbh_resi$tree_site_ID]
+
+# troubleshoot missing dbh residrill measurements (STCK-1 only 40cm, STCK-10 needs height = 109, STCK-18 repeated 2x)
+stck10 <- myrt %>% filter(tree_site_ID == "STCK-10" & drill_height_cm == 109)
+dbh_resi <- rbind(dbh_resi, stck10)
+dbh_resi <- dbh_resi %>% filter(!(tree_site_ID == "STCK-18" & drill_height_cm == 114))
+
+# merge in linear_mean of dbh measurement for each tree to frustum df
+dbh_resi_merge <- dbh_resi[c("tree_site_ID", "linear_mean")]
+frustrum_agb <- left_join(dbh_resi_merge, frustrum, by = "tree_site_ID")
+frustrum_agb$sp_damaged_kg <- (frustrum_agb$linear_mean * frustrum_agb$undamaged_kg)
+
+# proportion of biomass damaged from single point and multi point estimate
+frustrum_agb$sp_damaged_prop <- frustrum_agb$sp_damaged_kg/frustrum_agb$undamaged_kg
+frustrum_agb$mp_damaged_prop <- frustrum_agb$mp_damaged_kg/frustrum_agb$undamaged_kg
+frustrum_agb_long <- pivot_longer(frustrum_agb, cols = sp_damaged_kg:mp_damaged_kg)
+
+t <- wilcox.test(frustrum_agb$sp_damaged_kg, frustrum_agb$mp_damaged_kg, paired = TRUE)
+
+detach(package:plyr)
+frustrum_agb_long %>% group_by(name) %>%
+  summarise(mean = mean(value), 
+            sd = sd(value)) -> df 
+
+ggplot(df, aes(x = name, y = mean, fill = name))+ 
+  geom_bar(stat = "identity", position = "dodge")+
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), width = 0.07)+
+  theme_classic()+
+  ylab("AGB in frustrum (kg)")+
+  xlab("")+
+  theme(legend.position="none")
+```
+
+Figure 4
+```{r}
+# merge in presence/absence data for termite/fire presence
+tree_damage <- tree_level_damage_myrt[c("tree_site_ID", "site", "termite_pres", "mound", "runway", "termite", "fire")]
+frustrum <- left_join(frustrum, tree_damage, by = c("tree_site_ID", "site"))
+mod <- lm(mp_damaged_kg ~ fire+termite_pres, data = frustrum)
+summary(mod)
+check_model(mod)
+pred_data <- ggpredict(mod, terms = c("termite_pres","fire"))  %>% plot(add.data = TRUE)
+
+# plotting seperately (different than the combined model)
+a <- ggplot(frustrum, aes(x = termite_pres, y = mp_damaged_kg, fill = termite_pres))+ 
+  geom_boxplot()+
+  theme_classic()
+b <- ggplot(frustrum, aes(x = fire, y = mp_damaged_kg, fill = fire))+ 
+  geom_boxplot()+
+  theme_classic()
+ggarrange(a, b, ncol = 2)
+
+# Extract observed data
+obs_data <- data.frame(termite_pres = frustrum$termite_pres,
+                       fire = frustrum$fire,
+                       response = frustrum$mp_damaged_kg) 
+ggplot() +
+# Plot predicted values as boxplot
+  geom_boxplot(data = pred_data, aes(x = x, y = predicted, color = group)) +
+  # Add observed data as points
+  geom_point(data = obs_data, aes(x = termite_pres, y = response, color = factor(fire)), position = position_jitterdodge()) +
+  # Adjust appearance (customize as needed)
+  labs(x = "Termite Presence", y = "Response", color = "Fire") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+Figure 5
+```{r}
+# relationships between termite/fire evidence for different size/wd  
+# binomial model - define coding 
+myrt$termite_num <- ifelse(myrt$termite_pres == "Y", 1, 0)
+myrt$mound_num <- ifelse(myrt$mound == "Y", 1, 0)
+myrt$runway_num <- ifelse(myrt$runway == "Y", 1, 0)
+myrt$termitesampled_num <- ifelse(myrt$termite == "Y", 1, 0)
+myrt$fire_num <- ifelse(myrt$fire == "Y", as.integer(1), as.integer(0))
+
+# model - DBH
+myrt %>%
+  group_by(tree_site_ID, species, site) %>%
+  distinct(dbh_cm.x, wd, fire_num, termite_num, mound_num, runway_num, termitesampled_num)-> pp
+
+# single model with interaction between wd and size
+pp$category <- fct_relevel(as.factor(pp$wd), "0.9770", "0.8453", "0.7405")
+                           
+test <- glm(termite_num ~ dbh_cm.x * category, data = pp, family = binomial(logit))
+summary(test)
+Anova(test)
+r2(test)
+vif(test)
+check_model(test)
+ggpredict(test, terms = c("dbh_cm.x","category")) %>% plot()
+
+# two models - split out DBH and wd
+term_dbh <- glm(termite_num ~ dbh_cm.x, data = pp, family = binomial(logit))
+summary(term_dbh)
+Anova(term_dbh)
+dbh <- ggpredict(term_dbh, terms = c("dbh_cm.x"))  %>% plot(add.data = TRUE)
+
+term_dbh_graph <- ggplot(pp, aes(x = dbh_cm.x, y =  termite_num))+
+  geom_point()+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  theme_classic()+
+  xlab("DBH (cm)")+
+  ylab("Termite activity")
+  
+term_wd <- glm(termite_num ~ wd , data = pp, family = binomial("logit"))
+summary(term_wd)
+Anova(term_wd)
+wd <- ggpredict(term_wd, terms = c("wd")) %>% plot(add.data = TRUE)
+
+term_wd_graph <- ggplot(pp, aes(x = wd, y =  termite_num))+
+  geom_point()+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  theme_classic()+
+  xlab("Wood density (g/cm3)")+
+  ylab("")
+
+term_dbh_graph + term_wd_graph + patchwork::plot_annotation(tag_levels = "a")
+```
+
+Figure 6 (??) do bigger / denser trees have greater amounts of damage in the frustum? 
+```{r}
+# size model
+mod_test <- lm(mp_damaged_kg ~ dbh_cm, data = frustrum)
+summary(mod_test)
+check_model(mod_test)
+ggpredict(mod_test, terms = c("dbh_cm"))  %>% plot(add.data = TRUE)
+
+# density model
+mod_test <- lm(mp_damaged_kg ~ wd, data = frustrum)
+summary(mod_test)
+check_model(mod_test)
+ggpredict(mod_test, terms = c("wd"))  %>% plot(add.data = TRUE)
+
+```
+
+Supplementary Table 1. Site description, stem percentages, and species biomass
+```{r}
+# station creek biomass summary
+stck_agb <- agb[agb$site == "station_creek",]
+stck_agb %>% group_by(species) %>%
+  summarise(biomass = sum(agb), 
+            count = n(), 
+            agb_perc = (biomass/15.38937)*100, 
+            stem_perc = (count/50)*100) -> stck_out
+
+# pennyweight biomass calculate
+pnw_stems$dbh <- pnw_stems$Circ_cm/(2*pi)
+pnw_stems$wd <- NA
+pnw_stems$wd <- ifelse(pnw_stems$species == "Melaleuca stenostachya", 0.7405, pnw_stems$wd)
+pnw_stems$wd <- ifelse(pnw_stems$species == "Eucalyptus cullenii", 0.977, pnw_stems$wd)
+pnw_stems$wd <- ifelse(pnw_stems$species == "Terminalia aridicola subsp. chillagoensis", 0.74, pnw_stems$wd)
+pnw_stems$wd <- ifelse(pnw_stems$species == "Gardenia vilhelmii", 0.64, pnw_stems$wd)
+
+pnw_stems$agb <- computeAGB(D = pnw_stems$dbh, WD = pnw_stems$wd, coord = c(144.92,-16.57))
+  
+# pennyweight biomass summary
+pnw_stems %>% group_by(species) %>%
+  summarise(biomass = sum(agb), 
+            count = n(), 
+            agb_perc = (biomass/2.324303)*100, 
+            stem_perc = (count/49)*100) -> pnw_out
+```
+
+Supplementary Table 2. Sample sizes for residrill measurements
+
+Supplementary Figure 1, Table E
+```{r}
+# relationship between dbh and wd 
+# model
+mod3 <- lm(dbh_cm.x ~ wd, data = pp)
+summary(mod3)
+
+ggpredict(mod3, terms = c("wd")) %>% plot(add.data = TRUE)
+
+wd <- ggplot(pp,aes(x= wd, y = dbh_cm.x, colour= species))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  theme_classic()
+```

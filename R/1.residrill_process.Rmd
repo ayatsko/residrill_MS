@@ -1,0 +1,563 @@
+---
+title: "resi_heights_processing"
+author: "abbey yatsko"
+date: "2023-02-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+library prep
+```{r include = FALSE}
+library(tidyverse)
+library(future.apply)
+library(dplyr)
+library(plyr)
+library(tidyr)
+library(stringr)
+library(ggpubr)
+library(ggplot2)
+```
+
+load functions 
+```{r}
+# function to read residrill data in from .rgp files 
+read_resi <- function(x) {
+  #Extract drill data
+  drill <- x[grep("drill",x = x)]
+  drill <-gsub(pattern ='"|:|\\s|\\[|\\]|[[:alpha:]]|\\,$',replacement = "",x = drill,perl =TRUE)
+  drill <- as.double(unlist(strsplit(drill,split = ",")))
+  
+  #extract feed data
+  feed <- x[grep("[[:punct:]]{1}feed[[:punct:]]{1}",x = x)]
+  feed <-gsub(pattern ='"|:|\\s|\\[|\\]|[[:alpha:]]|\\,$',replacement = "",x = feed,perl =TRUE)
+  feed <- as.double(unlist(strsplit(feed,split = ",")))
+  
+  #get observation id
+  id <- x[grep("idNumber",x = x)]
+  id <-gsub(pattern = "idNumber|[[:punct:]]|\\s",replacement ="" ,x = id)
+  
+  #resi number
+  number <- x[grep("[[:punct:]]{1}number[[:punct:]]{1}",x = x)]
+  number <-gsub(pattern = "[[:alpha:]]|[[:punct:]]|\\s",replacement ="" ,x = number)
+  
+  #depth 
+  depth_mm <- x[grep("depthMsmt",x = x)]
+  depth_mm <-gsub(pattern = "[[:alpha:]]|[[:punct:]]|\\s",replacement ="" ,x = depth_mm)
+  depth_mm <- as.double(depth_mm)
+  depth_mm <- 1:depth_mm
+  out <- data.frame(id, number, drill, feed, depth_mm)
+  
+  return(out)
+}
+
+# function to find inflection points and generate knee_list
+knee_f <- function(x){
+  xs <- x$obj$K
+  
+  ys <- x$obj$U
+  dat <- data.frame(xs, ys)
+  dat <- dat[is.finite(rowSums(dat)),] ##get rid of inf values in r_list$obk
+  #print(dat)
+  
+  knee <- uik(x = dat$xs, y= dat$ys)
+  return(knee)
+}
+
+# function for dynamic programming
+dynProg.mean <- function(y, Kmax, Lmin) {
+  Nr  <- Kmax - 1
+  n <- length(y)
+  V <- matrix(Inf, nrow = n, ncol = n)
+  for (j1 in (1:(n-Lmin+1))){
+    for (j2 in ((j1+Lmin-1):n)) {
+      yj <- y[j1:j2]
+      nj <- j2-j1+1
+      V[j1,j2] <- sum(yj^2) - (sum(yj)^2)/nj
+    }
+  }
+  
+  U <- vector(length=Kmax)
+  U[1] <- V[1,n]
+  D <- V[,n] 
+  Pos <- matrix(nrow = n, ncol = Nr) 
+  Pos[n,] <- rep(n,Nr)    
+  tau.mat <- matrix(nrow = Nr,ncol = Nr) 
+  for (k in 1:Nr){
+    for (j in 1:(n-1)){
+      dist <- V[j,j:(n-1)] + D[(j+1):n]
+      D[j] <- min(dist)
+      Pos[j,1] <- which.min(dist) + j
+      if (k > 1) { Pos[j,2:k] <- Pos[Pos[j,1],1:(k-1)] }
+    }
+    U[k+1] <- D[1]
+    tau.mat[k,1:k] <- Pos[1,1:k]-1
+  }
+  out <- list(Test=tau.mat, obj=data.frame(K=(1:Kmax),U=U))
+  return(out)
+}
+
+# function to output sound wood segment classification 
+get_sound <- function(df, r, Kopt, max_lenght=NULL) {
+  y <- df$feed
+  n <- length(y)
+  Topt <- c(0,r$Test[(Kopt-1),1:(Kopt-1)],n)
+  Tr <- c(0,Topt[2:Kopt],n) 
+  dm <- data.frame()
+  for (k in (1:Kopt)) {
+    m <- median(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    sd <- mad(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    dm <- rbind(dm, c(Tr[k],Tr[k+1],m,sd))
+  }
+  names(dm) <- c("x1","x2","mu", "sd")
+  return(dm)
+}
+
+# function to calculate and remove bark from each trace 
+bark_f <- function(df) {
+  df$bark <- floor((unique(df$bark)*10)) # convert bark in mm to 1/10 of mm (like residrill data)
+  df$bark_far <-  df$bark+100 # added another cm to the bark on the far side of the tree as often resi would keep going before retracting
+  near <- df$bark[1] # mm on which first bark ends (entry point)
+  far <- df$bark_far[1] # mm on which second bark starts (exit point)
+  length <- length(df$bark)
+
+    if (df$abs_diff[1] <= 5) {
+    # for complete trace capturing entirety of tree dbh
+    out <- df[near:(length-far),]
+    
+  } else{
+    # detect anomalies if resi did not come out the other end (incomplete trace)
+    out <- df[near:length,]
+  }
+  out$depth_mm_nb <- 1:nrow(out)
+  out
+}
+
+# function to split tree in half 
+tree2half <- function(x) {
+  # calculate radial distance
+  x$radial <- x$depth_mm_nb-unique((x$drill_dbh_cm*100)/2)
+  x$half <- ifelse(x$radial>0, yes = "upper",no = "lower")
+  # convert all values to positive to analyse
+  x$radial <- abs(x$radial)
+  # rearrange tables into radial distance (i.e. starting from center for both lower and upper halves)
+  x <- arrange(x,radial)
+}
+
+# function to fix traces < 90% coverage: splits tree in half, selects first half, and mirrors first half to recreate second half
+fix_tree_half <- function(x) {
+  # calculate radial distance
+  x$radial <- x$depth_mm_nb-unique((x$drill_dbh_cm*100)/2)
+  x$half <- ifelse(x$radial>0, yes = "upper",no = "lower")
+  
+  # remove 'upper' rows as this is an incomplete half 
+  x <- x[!x$half == "upper",]
+  
+  # duplicate lower half to mirror as replacement for incomplete upper half 
+  y <- x
+  y$half[y$half == "lower"] <- "upper"
+  
+  # flip upper df 
+  y <- y[order(-y$radial),]
+  
+  # remove radial = 0 (there can only be one and lower gets it)
+  y <- y[!y$radial == 0, ]
+  
+  # fix numbering of resi_depth
+  recount <- max(x$depth_mm_nb)+1
+  end <- recount + nrow(y) - 1
+  y$depth_mm_nb <- recount:end
+  
+  # rbind true first half (lower) and synthesized second half (upper)
+  df <- rbind(x, y)
+  
+  # convert all values to positive to analyse
+  df$radial <- as.numeric(df$radial)
+  df$radial <- abs(df$radial)
+  
+  return(df)
+}
+
+# function to get segments for sound wood classification 
+get_segment <- function(resi_dat, r, Kopt, alpha, sw) {
+  y <- resi_dat$feed
+  n <- length(y)
+  Topt <- c(0,r$Test[(Kopt-1),1:(Kopt-1)],n)
+  Tr <- c(0,Topt[2:Kopt],n)
+  dm <- data.frame()
+  for (k in (1:Kopt)) {
+    m <- median(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    sd <- mad(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    dm <- rbind(dm, c(Tr[k],Tr[k+1],m,sd))
+  }
+  names(dm) <- c("x1","x2","mu", "sd")
+  
+  mean_feed <- sw$mu
+  sigma <- sw$sd
+  dm$pc_length <- (dm$x2-dm$x1)/last(dm$x2)
+  dm$z<- (dm$mu-mean_feed)/(sigma)
+  dm$p_val<- pnorm(dm$z,lower.tail = TRUE)
+  dm$sig <- ifelse(dm$p_val<= alpha, "*","")
+  dm$x1 <- n - dm$x1 # fix the problem of intervals not matching depth_mm_nb
+  dm$x2 <- n - dm$x2 # fix the problem of intervals not matching depth_mm_nb
+  
+  #bark beggining is not significant
+  #dm$sig[1] <- "" take this out because bark has already been cut off
+  return(dm)
+}
+
+# function to get segments and classify damage on tree halves
+half_tree_segment <- function(resi_dat, r, Kopt, alpha, feed_tree, sw) {
+  y <- resi_dat$feed
+  y_all <- feed_tree$feed
+  dbh_last <- unique(feed_tree$drill_dbh_cm)*100
+  dbh <- seq_along(1:dbh_last)
+  n <- length(y)
+  Topt <- c(0,r$Test[(Kopt-1),1:(Kopt-1)],n)
+  Tr <- c(0,Topt[2:Kopt],n)
+  dm <- data.frame()
+  for (k in (1:Kopt)) {
+    m <- median(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    sd <- mad(y[(Topt[k]+1):Topt[k+1]],na.rm = TRUE)
+    dm <- rbind(dm, c(Tr[k],Tr[k+1],m,sd))
+  }
+  names(dm) <- c("x1","x2","mu", "sd")
+  
+  # area of semi circle
+  dm$area_sc <- (pi/2)*((dm$x2/2)^2)
+  # area of circle
+  
+  # area of the doughnut
+  dm$doughtnut_area <- c(dm$area_sc[1],sapply(seq_len(Kopt-1), function(x)
+    dm$area_sc[x+1]-dm$area_sc[x]))  
+  # proportion area compare to whole tree
+  dm$doughnut_pc_area <-(dm$doughtnut_area)/(pi*(length(y)/2)^2)
+  # mean_feed <- median(feed_all)
+  mean_feed <- sw$mu
+  # sigma <- mad(feed_all)
+  sigma <- sw$sd
+  dm$pc_length <- ((dm$x2-dm$x1)/length(y))*(length(y)/length(dbh))
+  dm$z<- (dm$mu-mean_feed)/(sigma)
+  dm$p_val<- pnorm(dm$z,lower.tail = TRUE)
+  dm$sig <- ifelse(dm$p_val<= alpha, "*","")
+  
+   ifelse(resi_dat$half == "upper", dm$sig[length(dm$sig)] <- "", dm$sig[1] <- "") # sapwood correction, best solution
+   
+  return(dm)
+}
+
+# function to fix traces to correct feed values = 0
+fill_zeros <- function(x){
+  # define length of 50% tree diameter 
+  half_length_mm <- as.numeric((x$drill_dbh_cm / 2 )*100)[1]
+  
+  # find current length 
+  length <- as.numeric(nrow(x))
+  
+  # find how many rows have to be added 
+  add <- half_length_mm - length
+  add <- c(1:add)
+  added <- data.frame(matrix(NA, ncol=ncol(x), nrow=length(add)))
+  colnames(added) <- colnames(x)
+  
+  # rbind added to input 
+  df <- rbind(x, added)
+                  
+  # if x$ feed is empty, then fill with 0 
+  df$feed[is.na(df$feed)] <- 0 
+  
+  # adjust depth of trace
+  df$depth_mm <- c(1:half_length_mm)
+    
+  # then fill out the rest of the columns til the end based on the last record 
+  out <- df %>% fill(names(df))
+  
+  return(out)
+}
+```
+
+1. preprocessing of residrill files 
+  * read .rgp files in using "read_resi" function 
+  * format and merge with metadata 
+  * seperate out full traces from incomplete traces (not all of the traces passed through 100% of the tree)
+  * remove bark from each trace
+  * generate list of all traces and working df with traces from list combined 
+```{r}
+# read in residrill files (.rgp format)
+files <- list.files("/Users/abbeyyatsko/Desktop/repos/residrill_MS/data/residrill_traces_rgp" ,full.names = TRUE, pattern = "rgp",recursive = TRUE)
+
+# generate large list, each element is a residrill file
+rgp_in <- sapply(files, readLines, USE.NAMES= TRUE, simplify = FALSE) 
+
+# make residrill files into data frames using the read_resi function, further formatting
+resi_dat <- sapply(seq_along(rgp_in), function(x) read_resi(rgp_in[[x]]), USE.NAMES= TRUE, simplify = FALSE)
+names(resi_dat) <- names(rgp_in)
+resi_dat_l <- bind_rows(resi_dat)
+resi_dat_l$number<- as.numeric(resi_dat_l$number)
+
+# read in drill metadata
+dat <- read.csv("/Users/abbeyyatsko/Desktop/repos/residrill_MS/data/residrill_traces.csv")
+
+# create column recording depth of residrill path 
+depth <- sapply(resi_dat, function(x) tail(x$depth_mm,1)/100,USE.NAMES = TRUE,simplify = FALSE)  
+names(depth) <- names(rgp_in)
+
+# calculate depth that residrill went to for each trace
+depth_v <- t(do.call(cbind.data.frame, depth))
+id <- rownames(depth_v)
+depth_df <- tibble(id, depth_v)
+
+# extract trace ID from filename
+depth_df$id <- qdapRegex::ex_between(depth_df$id, "renamed/", ".rgp")
+
+# make sure drill IDs are factor variables
+dat$drill_ID <- as.factor(dat$drill_ID)
+depth_df <- as.data.frame(lapply(depth_df, unlist))
+depth_df$id <- as.factor(depth_df$id)
+
+# join resi path depth with metadata
+d2 <-left_join(dat,depth_df, by = c("drill_ID"="id"))
+
+# calculate difference between resi reading depth and dbh 
+d2$abs_diff <- (d2$drill_dbh_cm-d2$depth_v)
+
+# calculate amount of bark based on Rosell 
+# https://nph.onlinelibrary.wiley.com/doi/10.1111/nph.13889
+d2$bark <-d2$drill_dbh_cm^0.700
+
+# d2 and resi_dat_l have IDs that are slightly different (PNW-01 / PNW01): from d2 remove '-' from drill_ID
+d2$drill_ID <- gsub('-','',d2$drill_ID)
+
+# separate out complete/complete traces based on percentage of trace measured based on field dbh 
+d2$perc_thru <- ((d2$depth_v / (d2$drill_dbh_cm )*100))
+# table(d2$perc_thru > 90)
+d2$full_trace <- ifelse(d2$perc_thru > 90, "Y", "N")
+
+# remove 3 traces that have less than 50% coverage of full trace (these will have to be special cases)
+d2$full_trace <- ifelse(d2$perc_thru < 50, yes = "R", no = d2$full_trace)
+
+# classify complete and incomplete working dfs 
+complete <- d2[d2$full_trace == "Y",]
+complete_join <- left_join(complete, resi_dat_l, by = c("drill_ID"="id"))
+complete_join$drill_ID <- as.factor(complete_join$drill_ID) 
+```
+
+COMPLETE TRACES
+```{r}
+# generate full list of complete traces
+complete_join %>%
+  group_by(drill_ID, tree_ID, species) %>%
+  mutate(max_x = max(depth_v), max_y=max(feed),
+         sampled_stem = (depth_v*100)/drill_dbh_cm) %>% 
+  ungroup() %>%
+  group_split(drill_ID, species, drill_dbh_cm) -> resi_dat_c
+
+# save(resi_dat_c, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_c.RData")
+
+# calculate bark 
+resi_dat_c_nb <- lapply(seq_along(resi_dat_c), function(x) bark_f(resi_dat_c[[x]]))
+# save(resi_dat_c_nb, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_c_nb.RData")
+```
+
+INCOMPLETE/REMOVED TRACES
+```{r}
+# traces that are 50% < X < 90%
+incomplete <- d2[d2$full_trace == "N",]
+incomplete_join <- left_join(incomplete, resi_dat_l, by = c("drill_ID"="id"))
+incomplete_join$drill_ID <- as.factor(incomplete_join$drill_ID) 
+
+# generate full list of incomplete traces
+incomplete_join %>%
+  group_by(drill_ID, tree_ID, species) %>%
+  mutate(max_x = max(depth_v), max_y=max(feed),
+         sampled_stem = (depth_v*100)/drill_dbh_cm) %>% 
+  ungroup() %>%
+  group_split(drill_ID, species, drill_dbh_cm) -> resi_dat_inc
+# save(resi_dat_inc, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_inc.RData")
+
+# calculate bark 
+resi_dat_inc_nb <- lapply(seq_along(resi_dat_inc), function(x) bark_f(resi_dat_inc[[x]]))
+# save(resi_dat_inc_nb, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_inc_nb.RData")
+
+# remove traces with <50% coverage from processing pipeline: deal with these seperately on a case-by-case
+removed <- d2[d2$full_trace == "R",]
+removed_join <- left_join(removed, resi_dat_l, by = c("drill_ID"="id"))
+removed_join$drill_ID <- as.factor(removed_join$drill_ID) 
+
+removed_join %>%
+  group_by(drill_ID, tree_ID, species) %>%
+  mutate(max_x = max(depth_v), max_y=max(feed),
+         sampled_stem = (depth_v*100)/drill_dbh_cm) %>% 
+  ungroup() %>%
+  group_split(drill_ID, species, drill_dbh_cm) -> resi_dat_rem
+
+# save(resi_dat_rem, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_rem.RData")
+
+# see whats going on with these highly damaged ones 
+ggplot(resi_dat_rem[[2]], aes(x= depth_mm))+
+  ylab("Resistance")+
+  geom_area(aes(y = feed), fill = "black", alpha = 0.5)+
+  geom_area(aes(y = drill), fill ="green", alpha = 0.5)
+# View(resi_dat_rem[[2]])
+
+# VERDICT: looks like 1 and 3 were drill overloads, 13, 30% coverage. need to drop from dataset
+# 2 could be filled in with zeros to fix (case: too hollow), plus its practically at 50% (45% thru)
+
+# remove bark 
+resi_dat_rem_nb <- lapply(seq_along(resi_dat_rem), function(x) bark_f(resi_dat_rem[[x]]))
+# save(resi_dat_rem_nb, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_rem_nb.RData")
+```
+
+1.1. address incomplete traces 
+  * using redi_dat_inc_nb
+  * firest split tree in half
+  * select first half only 
+  * then mirror first half to recreate second half and generate 'complete' trace
+  * fill zeros for samples
+```{r}
+# visualize incomplete
+# pdf(file = "/Users/abbeyyatsko/Downloads/residrill_incomplete.pdf", onefile = TRUE)
+# # graphing portion
+# lapply(seq_along(resi_dat_inc), function(x){ggplot(resi_dat_inc[[x]], aes(x= depth_mm))+
+#     ylab("Resistance")+
+#     geom_area(aes(y = feed), fill = "black", alpha = 0.5)+
+#     geom_area(aes(y = drill), fill ="green", alpha = 0.5)})
+# dev.off()
+
+# fix removed traces: only [[2]] fill with zeros
+removed_fixed <- lapply(seq_along(resi_dat_rem_nb), function(x) fill_zeros(resi_dat_rem_nb[[x]]))
+
+# viz check
+ggplot(removed_fixed[[3]], aes(x= depth_mm_nb))+
+  ylab("Resistance")+
+  geom_area(aes(y = feed), fill = "black", alpha = 0.5)+
+  geom_area(aes(y = drill), fill ="green", alpha = 0.5)
+
+# remove elements 1,3 as they have to be thrown out (drill overloads)
+removed_fixed <- removed_fixed[-c(1, 3)]
+
+# merge this in with the incomplete traces to continute processing 
+incomplete_to_complete <- append(removed_fixed, incomplete_fixed)
+
+# halve and mirror the incomplete trees 
+incomplete_fixed <- lapply(seq_along(incomplete_to_complete), function(x) fix_tree_half(incomplete_to_complete[[x]]))
+
+# bring complete and fixed incomplete back into the same list
+resi_dat_all_nb <- append(resi_dat_c_nb, incomplete_fixed)  
+# save(resi_dat_all_nb, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_all_nb.RData")
+```
+
+2. calculate sound wood thresholds for entire brooklyn df
+  * reorder traces from high to low feed 
+  * run through dynamic programming 
+  * split into 2 segments
+  * define sound wood segments, mu, and sd
+  * save sound wood threshold mean and sd
+```{r}
+# only working with complete traces to start
+load("resi_dat_all_nb.RData")
+
+# reorder all traces from high to low 
+list <- lapply(seq_along(resi_dat_all_nb), function(x)
+  resi_dat_all_nb[[x]][order(resi_dat_all_nb[[x]]$feed, decreasing = TRUE),]) 
+
+# dynamic programming 
+Kmax <- 5 # maximum number of segments that trace can be divided into (we ultimately only want 2 for sw classification)
+Lmin <- 10  # minimum length of a segment (start at 10 originally, run at higher numbers to speed things up) 
+plan(multisession) # when you want to run things in parallel (future_sapply)
+
+r_list1 <- lapply(seq_along(list), function(x) dynProg.mean(list[[x]]$feed, Kmax, Lmin))
+
+# set knee list (static, not optimized)
+knee_list <- 2
+
+# get sound wood segments 
+sws_c_nb <- lapply(seq_along(list), function(x) get_sound(list[[x]], r_list1[[x]], knee_list))
+
+# get mean and sd of sound wood to use as threshold
+sw_c_nb <- lapply(seq_along(sws_c_nb), function(x) (sws_c_nb[[x]][1,3:4]))
+
+# save sound wood threshold mean and sd
+# save(sw_c_nb, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/sw_c_nb.RData")
+```
+
+3. split traces in half
+  * split each trace into lower/upper halves using "tree2half"
+  * to account for radial distances, read traces from inward to outward points (start at tree center, go out towards bark)
+```{r}
+# load sound wood thresholds for full traces only
+load("sw_c_nb.RData")
+
+# load residrill datasetfor all traces
+load("resi_dat_all_nb.RData")
+
+# split the tree data into two DF in a list (for lower and upper), calculate radial distance (moving from tree center outwards)
+resi_dat_c_area <- lapply(resi_dat_all_nb, function(x){out <- tree2half(x); return(out)}) 
+
+# split lists into lower and upper sub list, order each lower/upper section from center of tree to perimeter
+tree_half_all <- sapply(resi_dat_c_area, function(x) out <- split(x = x, f = paste0(x$half,"-",x$drill_ID)), 
+                        simplify = FALSE,USE.NAMES = TRUE)
+
+# keep the total feed as part of each half as it is needed for analysing both segments
+full_feed <- rep(resi_dat_c_area,each = 2)
+
+# name the vectors of full feed, split by unique drill ID and then upper/lower segment
+names(full_feed) <- paste0(list("lower-","upper-"), sapply(full_feed, function(x) unique(x$drill_ID)))
+
+# replicate sound wood df (2 for each residrill trace)
+sound_wood <- rep(sw_c_nb,each = 2)
+
+# name the vectors of sound wood
+names(sound_wood) <- names(full_feed)
+
+# each tree lower/upper now in its own list for processing (currently it is a list of lists)
+tree_half_all <- unlist(tree_half_all, recursive = FALSE, use.names = TRUE)
+
+# have sw list matched to each tree as its separated out by lower/upper 
+sound_wood <- sound_wood[names(sound_wood) %in% names(tree_half_all)]
+
+# filter full feed to match 
+full_feed <- full_feed[names(full_feed) %in% names(tree_half_all)]
+```
+
+4. classify damage on tree half segments
+  * run dynamic programming seperately on lower/upper segments 
+  * define optimal inflection points 
+  * classify damage on optimal segments
+```{r}
+# run dynamic programming 
+# set parameters
+Kmax <- 50 # maximum number of segments 
+Lmin <- 10  # minimum length of a segment (work with 10) 
+plan(multisession)
+
+r_list <- lapply(seq_along(tree_half_all), function(x) dynProg.mean(tree_half_all[[x]]$feed, Kmax, Lmin))
+
+# find optimal breakpoints 
+knee_list <- lapply(r_list, function(x) knee_f(x)) 
+
+# figure out output of half_tree_segment 
+area_mat <- sapply(seq_along(tree_half_all), function(x) half_tree_segment(tree_half_all[[x]], r_list[[x]], knee_list[[x]], alpha = 0.05, full_feed[[x]], sound_wood[[x]]), simplify = FALSE, USE.NAMES = TRUE )
+
+# keep names of traces
+names(area_mat) <- names(tree_half_all)
+```
+
+5. DATA OUT: quantify damage
+```{r}
+damage_area <- sapply(area_mat, function(x) sum(x$doughnut_pc_area[which(x$sig=="*")]),simplify = FALSE,USE.NAMES = TRUE)
+damage_area_df <- do.call(rbind, damage_area)
+
+damage_length <- sapply(area_mat, function(x) sum(x$pc_length[which(x$sig=="*")]),simplify = FALSE,USE.NAMES = TRUE)
+damage_length_df <- do.call(rbind, damage_length)
+
+dat_compare <- data.frame(cbind(area = damage_area_df, linear = damage_length_df))
+dat_compare <- cbind(resi_half = rownames(dat_compare), dat_compare)
+colnames(dat_compare) <- c("resi_half", "area", "linear")
+rownames(dat_compare) <- NULL
+
+# export full trace first estimates 
+# write.csv(dat_compare, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/data_out/damage_est_c.csv")
+```

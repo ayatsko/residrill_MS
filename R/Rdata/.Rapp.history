@@ -1,0 +1,2 @@
+load("/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/resi_dat_c.RData")
+load("/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/tree_level_damage_myrt.RData")

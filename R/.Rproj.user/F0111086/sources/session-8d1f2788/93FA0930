@@ -1,0 +1,26 @@
+{
+    "id": "93FA0930",
+    "path": "~/Desktop/repos/residrill_MS/R/3.figures_models.Rmd",
+    "project_path": "3.figures_models.Rmd",
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1716317089988.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "279,17",
+        "scrollLine": "275"
+    },
+    "folds": "106|23|117|0|\n120|22|131|0|\n",
+    "lastKnownWriteTime": 1716323190,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1716323190266,
+    "read_only": false,
+    "read_only_alternatives": []
+}
