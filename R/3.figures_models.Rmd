@@ -37,39 +37,48 @@ pnw_stems <- read.csv("/Users/abbeyyatsko/Desktop/repos/residrill_MS/data/pnw_bi
 
 Figure 2 
 ```{r}
-# a. relationship between proportion damage and height in tree
-glmmtb <- glmmTMB(linear_mean ~ drill_height_cm + dbh_cm.x + species + (1|tree_site_ID), myrt, family=list(family="beta",link="logit"))
-summary(glmmtb)
-check_model(glmmtb)
-Anova(glmmtb)
+# a. relationship between proportion damage and tree species
+myrt$species <- fct_relevel(myrt$species, "Corymbia clarksoniana", "Eucalyptus cullenii", "Melaleuca stenostachya")
 
-prop <- ggpredict(glmmtb, terms = c("species")) 
-plot(prop)+
-   labs(x = "Species", y = "Damage", title = "Predicted proportion damage") # need to turn this into a finalized fig...
+m1 <- glmmTMB(linear_mean ~ drill_height_cm + dbh_cm.x + species + (1|tree_site_ID), myrt, family=list(family="beta",link="logit"))
+summary(m1)
+check_model(m1)
+Anova(m1)
 
-a <- ggplot(myrt, aes(x = species, y = linear_mean, color = species)) + 
-  geom_boxplot() +
-  theme_classic() + 
-  xlab("") + 
-  ylab("Proportion damaged area")
+prop1 <- ggpredict(m1, terms = c("species")) 
+a <- plot(prop1)+
+   labs(x = "Species", y = "Proportion damaged", title = "Predicted proportion damage")
 
-# b. relationship between area damage and height in tree
+# b. relationship between area damage and tree species
 # define area of slice 1cm thick at each measurement point 
 myrt$V_xsection_cm3 <- ((myrt$drill_dbh_cm/2)^2)*(pi)*(1)
 myrt$V_xsection_cm3_damaged <- myrt$V_xsection_cm3 * myrt$linear_mean
 
-mixed.M1 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + dbh_cm.x + (1|tree_site_ID), REML = F, data = myrt)
-summary(mixed.M1)
-Anova(mixed.M1)
-check_model(mixed.M1)
+m2 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + dbh_cm.x + (1|tree_site_ID), REML = F, data = myrt)
+summary(m2)
+Anova(m2)
+check_model(m2)
 
+area <- ggpredict(mixed.M1, terms = c("species")) 
+b <- plot(area)+
+   labs(x = "Species", y = "Absolute damaged area (cm2)", title = "Predicted absoute area damage") 
+
+# c. relationship between proportion damage and height in tree by size 
+c <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean)) + 
+  geom_jitter() +
+  facet_wrap(~species) +
+  theme_classic() + 
+  xlab("Drill height (cm)") + 
+  ylab("Proportion damaged")
+
+# d. relationship between area damage and height in tree by size 
 v <- c(10, 25, 34)
-area <- ggpredict(mixed.M1, terms = c("drill_height_cm [all]", "dbh_cm.x [v]"), back.transform = TRUE)  #%>% plot(add.data = TRUE)
+area <- ggpredict(m2, terms = c("drill_height_cm [all]", "dbh_cm.x [v]"), back.transform = TRUE)  #%>% plot(add.data = TRUE)
 low <- "#364B9A"
 mid <- '#F99858'
 high <- '#A50026'
 
-b <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = dbh_cm.x)) + 
+d <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = dbh_cm.x)) + 
   geom_jitter() +
   facet_wrap(~species) +
   scale_colour_gradient2(low=low, mid=mid, midpoint = 30 , high=high, name ='DBH') +
@@ -87,14 +96,55 @@ b <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = d
               inherit.aes=FALSE,  alpha=0.2, fill = high)+
   theme_classic() + 
   xlab("Drill height (cm)") + 
-  ylab("Absolute damaged area")
+  ylab("Absolute damaged area (cm2)")
 
-# c. area damage contrasted with species boxplots 
-area <- ggpredict(mixed.M1, terms = c("species")) 
-plot(area)+
-   labs(x = "Species", y = "Damage (cm2)", title = "Predicted absoute area damage") 
 
-a+b + patchwork::plot_annotation(tag_levels = "a")
+a+b+c+d + patchwork::plot_annotation(tag_levels = "a")
+```
+
+Figure 2 REVISED (a-b is about species, c-d is about traits)
+```{r}
+# a. relationship between proportion damage and tree species
+m.1 <- glmmTMB(linear_mean ~ drill_height_cm  + species + (1|tree_site_ID), myrt, family=list(family="beta",link="logit"))
+summary(m.1)
+check_model(m.1)
+Anova(m.1)
+
+prop1 <- ggpredict(m.1, terms = c("species")) 
+a <- plot(prop1)+
+   labs(x = "Species", y = "Proportion damaged", title = "Predicted proportion damage")
+
+# b. relationship between area damage and tree species
+m.2 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + (1|tree_site_ID), REML = F, data = myrt)
+summary(m.2)
+Anova(m.2)
+check_model(m.2)
+
+area <- ggpredict(m.2, terms = c("drill_height_cm", "species")) 
+b <- plot(area)+
+   labs(x = "Species", y = "Absolute damaged area (cm2)", title = "Predicted absoute area damage") 
+
+# c. relationship between proportion damage and height in tree by size 
+m.3 <- glmmTMB(linear_mean ~ drill_height_cm  + dbh_cm.x + wd + (1|tree_site_ID), myrt, family=list(family="beta",link="logit"))
+summary(m.3)
+check_model(m.3)
+Anova(m.3)
+
+prop1 <- ggpredict(m.3, terms = c("wd", "dbh_cm.x")) 
+c <- plot(prop1)+
+   labs(x = "Wood density", y = "Proportion damaged", title = "Predicted proportion damage")
+
+# d. relationship between area damage and height in tree by size 
+m.4 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + dbh_cm.x + wd + (1|tree_site_ID), REML = F, data = myrt)
+summary(m.4)
+Anova(m.4)
+check_model(m.4)
+
+area <- ggpredict(m.4, terms = c("drill_height_cm", "dbh_cm.x")) 
+d <- plot(area)+
+   labs(x = "", y = "Absolute damaged area (cm2)", title = "Predicted absoute area damage") 
+
+a+b+c+d + patchwork::plot_annotation(tag_levels = "a")
 ```
 
 Figure 3 
@@ -171,7 +221,6 @@ frustrum_agb_long <- pivot_longer(frustrum_agb, cols = sp_damaged_kg:mp_damaged_
 
 t <- wilcox.test(frustrum_agb$sp_damaged_kg, frustrum_agb$mp_damaged_kg, paired = TRUE)
 
-detach(package:plyr)
 frustrum_agb_long %>% group_by(name) %>%
   summarise(mean = mean(value), 
             sd = sd(value)) -> df 
@@ -204,6 +253,22 @@ b <- ggplot(frustrum, aes(x = fire, y = mp_damaged_kg, fill = fire))+
   theme_classic()
 ggarrange(a, b, ncol = 2)
 
+# at species level 
+mod_sp <- lm(mp_damaged_kg ~ fire + termite_pres + species, data = frustrum)
+summary(mod_sp)
+check_model(mod_sp)
+ggpredict(mod_sp, terms = c("termite_pres", "fire", "species"))  %>% plot(add.data = TRUE)
+
+# at traits level 
+mod_tr <- lm(mp_damaged_kg ~ fire + termite_pres + wd + dbh_cm, data = frustrum)
+summary(mod_tr)
+check_model(mod_tr)
+ggpredict(mod_sp, terms = c("termite_pres", "fire", "dbh_cm"))  %>% plot(add.data = TRUE)
+
+mod_t <- lm(mp_damaged_kg ~ termite_pres*wd + termite_pres*dbh_cm, data = frustrum)
+summary(mod_t)
+
+###DRAFT#### ggpredict to boxplot 
 # Extract observed data
 obs_data <- data.frame(termite_pres = frustrum$termite_pres,
                        fire = frustrum$fire,
