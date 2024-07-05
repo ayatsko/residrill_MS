@@ -23,6 +23,7 @@ library(car)
 library(ggpmisc)
 library(glmmTMB)
 library(patchwork)
+library(emmeans)
 ```
 
 data load 
@@ -55,6 +56,7 @@ l <- '#364B9A'
 
 custom_colors <- c("Corymbia clarksoniana" = "#A50026", "Eucalyptus cullenii" = "#F99858", "Melaleuca stenostachya" = "#364B9A")
 colors <- c("Y" = "#a3dfba", "N" = "#347aa3")
+custom_colors_wd <- c("0.7405" = "#a3dfba", "0.8453" = "#347aa3", "0.977" = "#1f1120")
 ```
 
 Figure 2 models (a-b is about species, c-d is about traits)
@@ -113,7 +115,7 @@ b <- ggplot(myrt, aes(x = species, y = V_xsection_cm3_damaged, fill = species)) 
 # c) relationship between proportion damage and tree species at different heights
 prop1 <- ggpredict(m.1, terms = c("drill_height_cm", "species")) 
 plot(prop1, add.data = TRUE)+
-   labs(x = "Drill height (cm)", y = "Proportion damaged", title = "Predicted proportion damage") 
+   labs(x = "Drill height (cm)", y = "Proportion damaged", title = "Predicted proportion damage")
 
 c <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean, color = species)) + 
   geom_jitter() +
@@ -286,11 +288,21 @@ Anova(mod.A)
 # check_model(mod.A)
 ggpredict(mod.A, terms = c("species"))  %>% plot(add.data = TRUE)
 
+# posthoc pairwise tukey HSD to determine what species had differences
+x <- emmeans(mod.A, ~species)
+y <- pairs(x, adjust="tukey")
+
+# post hoc test for which species are different
+# estimated marginal means
+emms <- emmeans(mod.A, ~ species)
+pairwise_comparisons_tukey <- pairs(emms, adjust = "tukey")
+summary(pairwise_comparisons_tukey)
+
 # Damage ~ traits
 mod.B <- lmer(log(mp_damaged_kg) ~ dbh_cm + wd + (1|site), REML = F, data = frustrum)
 Anova(mod.B)
 #check_model(mod.B)
-dam_dbh <- ggpredict(mod.B, terms = c("dbh_cm"), back.transform = TRUE)
+dam_dbh <- ggpredict(mod.B, terms = c("dbh_cm", "wd"))# %>% plot(add.data = TRUE)
 
 # Damage ~ external factors
 mod.C <- lmer(log(mp_damaged_kg) ~ fire*termite_pres + (1|site), data = frustrum)
@@ -312,13 +324,29 @@ sp <- ggplot(frustrum, aes(x = species, y = mp_damaged_kg, fill = species))+
   theme(legend.position = "none")
 
 # Damage ~ traits
-tr <-ggplot(frustrum, aes(x = dbh_cm, y = mp_damaged_kg)) +
+frustrum$wd <- as.factor(frustrum$wd)
+tr <- ggplot(frustrum, aes(x = dbh_cm, y = log(mp_damaged_kg), color = wd)) +
   geom_jitter() +
-  geom_line(aes(x=x, y=predicted), data=filter(dam_dbh), 
+  geom_line(aes(x=x, y=log(predicted)), 
+            data=filter(dam_dbh, group=='0.7405'), 
             inherit.aes=FALSE, colour= low) + 
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(dam_dbh), 
+  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
+              data=filter(dam_dbh, group=='0.7405'), 
               inherit.aes=FALSE,  alpha=0.2, fill = low)+
+  geom_line(aes(x=x, y=log(predicted)), 
+            data=filter(dam_dbh, group=='0.8453'), 
+            inherit.aes=FALSE, colour= mid) + 
+  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
+              data=filter(dam_dbh, group=='0.8453'), 
+              inherit.aes=FALSE,  alpha=0.2, fill = mid) +
+  geom_line(aes(x=x, y=log(predicted)), 
+            data=filter(dam_dbh, group=='0.977'), 
+            inherit.aes=FALSE, colour= high) + 
+  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
+              data=filter(dam_dbh, group=='0.977'), 
+              inherit.aes=FALSE,  alpha=0.2, fill = high) +
   theme_classic() + 
+  scale_color_manual(values = custom_colors_wd) +
   xlab("Tree DBH (cm)") + 
   ylab("Total damaged biomass in lower stem (kg)")
   
@@ -351,14 +379,21 @@ myrt$runway_num <- ifelse(myrt$runway == "Y", 1, 0)
 myrt$termitesampled_num <- ifelse(myrt$termite == "Y", 1, 0)
 myrt$fire_num <- ifelse(myrt$fire == "Y", as.integer(1), as.integer(0))
 
-# model - DBH
 myrt %>%
   group_by(tree_site_ID, species, site) %>%
   distinct(dbh_cm.x, wd, fire_num, termite_num, mound_num, runway_num, termitesampled_num)-> pp
 
 # external damage ~ species (chi square)
-pp$termite_num <- as.factor(pp$termite_num)
-pp$fire_num <- as.factor(pp$fire_num)
+#pp$termite_num <- as.factor(pp$termite_num)
+#pp$fire_num <- as.factor(pp$fire_num)
+
+contingency_table_term <- table(pp$species, pp$termite_num)
+chi_term <- chisq.test(contingency_table_term, correct = TRUE)
+# There is a significant difference in termite presence across the species
+
+contingency_table_fire <- table(pp$species, pp$fire_num)
+chi_fire <- chisq.test(contingency_table_fire, correct = TRUE)
+# There is no significant difference in fire presence across the species
 
 # external damage ~ traits 
 term_dbh <- glm(termite_num ~ dbh_cm.x, data = pp, family = binomial(logit))
@@ -385,56 +420,52 @@ ggpredict(fire_wd, terms = c("wd")) %>% plot(add.data = TRUE)
 Figure 5 plots
 ```{r}
 # external damage ~ species 
-ggplot(pp, aes(x = species, fill = termite_num))+ 
+fig5_a <- ggplot(pp, aes(x = species, fill = termite_num))+ 
   geom_bar(position = "dodge")+
   theme_classic()+
   labs(x = "Species", y = "Count", fill = "External Termite Presence") +  
-  scale_fill_manual(values = c("0" = "red", "1" = "blue"), labels = c("Absent", "Present")) 
-
-ggplot(pp, aes(x = species, fill = fire_num))+ 
+  scale_fill_manual(values = c("0" = mid, "1" = low), labels = c("Absent", "Present")) +
+  scale_x_discrete(labels = c("C. clarksoniana", "E. cullenii", "M. stenostachya"))
+fig5_b <- ggplot(pp, aes(x = species, fill = fire_num))+ 
   geom_bar(position = "dodge")+
   theme_classic()+
   labs(x = "Species", y = "Count", fill = "External Fire Scarring") +  
-  scale_fill_manual(values = c("0" = "red", "1" = "blue"), labels = c("Absent", "Present")) 
+  scale_fill_manual(values = c("0" = mid, "1" = low), labels = c("Absent", "Present")) +
+  scale_x_discrete(labels = c("C. clarksoniana", "E. cullenii", "M. stenostachya"))
 
 # external damage ~ traits 
 term_dbh <- ggplot(pp, aes(x = dbh_cm.x, y =  termite_num))+
   geom_point()+
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = "black")+
   theme_classic()+
   xlab("DBH (cm)")+
   ylab("Termite presence")
 
 term_wd <- ggplot(pp, aes(x = wd, y =  termite_num))+
   geom_point()+
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = "black")+
   theme_classic()+
   xlab("Wood density (g/cm3)")+
   ylab("Termite presence")
 
 fire_dbh <- ggplot(pp, aes(x = dbh_cm.x, y =  fire_num))+
   geom_point()+
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = "black")+
   theme_classic()+
   xlab("DBH (cm)")+
   ylab("Fire scarring")
 
 fire_wd <- ggplot(pp, aes(x = wd, y =  fire_num))+
   geom_point()+
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = low)+
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE, color = "black")+
   theme_classic()+
   xlab("Wood density (g/cm3)")+
   ylab("Fire scarring")
 
-term_dbh + term_wd + fire_dbh + fire_wd + patchwork::plot_annotation(tag_levels = "a") 
+fig5_a + fig5_b + term_dbh + term_wd + patchwork::plot_annotation(tag_levels = "a") 
 ```
-  
 
-
-
-
-
-CHI SQUARE BULLSHIT 
+CHI SQUARE BULLSHIT # is this even needed? 
 ```{r}
 perform_chi_squared_test <- function(species_name, data) {
   # Filter data for the species
@@ -506,20 +537,27 @@ wd <- ggplot(pp,aes(x= wd, y = dbh_cm.x, colour= species))+
   theme_classic()
 ```
 
-### TRASH FIRE TRASH ###
-DRAFT ggpredict to boxplot 
+Supplementary something. size ~ species, wd ~ species
 ```{r}
-# Extract observed data
-obs_data <- data.frame(termite_pres = frustrum$termite_pres,
-                       fire = frustrum$fire,
-                       response = frustrum$mp_damaged_kg) 
-ggplot() +
-# Plot predicted values as boxplot
-  geom_boxplot(data = pred_data, aes(x = x, y = predicted, color = group)) +
-  # Add observed data as points
-  geom_point(data = obs_data, aes(x = termite_pres, y = response, color = factor(fire)), position = position_jitterdodge()) +
-  # Adjust appearance (customize as needed)
-  labs(x = "Termite Presence", y = "Response", color = "Fire") +
-  theme_minimal() +
-  theme(legend.position = "top")
+ggplot(frustrum, aes(x = species, y = dbh_cm, fill = species))+
+  geom_boxplot()+
+  theme_classic()+
+  xlab("")+
+  ylab("DBH (cm)")+
+  theme(legend.position = "none")
+
+# anova to test species differences in dbh 
+anova_result <- aov(dbh_cm ~ species, data = frustrum)
+summary(anova_result)
+TukeyHSD(anova_result)
+
+ggplot(frustrum, aes(x = species, y = wd, fill = species))+
+  geom_boxplot()+
+  theme_classic()+
+  theme(legend.position = "none")
 ```
+
+
+
+
+
