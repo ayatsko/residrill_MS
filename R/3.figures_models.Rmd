@@ -24,6 +24,7 @@ library(ggpmisc)
 library(glmmTMB)
 library(patchwork)
 library(emmeans)
+library(rstatix)
 ```
 
 data load 
@@ -388,11 +389,13 @@ myrt %>%
 #pp$fire_num <- as.factor(pp$fire_num)
 
 contingency_table_term <- table(pp$species, pp$termite_num)
-chi_term <- chisq.test(contingency_table_term, correct = TRUE)
+fisher_test(contingency_table_term)
+pairwise_fisher_test(contingency_table_term) # correction - use bonferroni
 # There is a significant difference in termite presence across the species
 
 contingency_table_fire <- table(pp$species, pp$fire_num)
 chi_fire <- chisq.test(contingency_table_fire, correct = TRUE)
+fisher_test(contingency_table_fire)
 # There is no significant difference in fire presence across the species
 
 # external damage ~ traits 
