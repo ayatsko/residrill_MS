@@ -60,19 +60,23 @@ colors <- c("Y" = "#a3dfba", "N" = "#347aa3")
 custom_colors_wd <- c("0.7405" = "#a3dfba", "0.8453" = "#347aa3", "0.977" = "#1f1120")
 ```
 
-Figure 2 models (a-b is about species, c-d is about traits)
+Figure 4 models 
 ```{r}
 # model 1. relationship between proportion damage and tree species
 m.1 <- glmmTMB(linear_mean ~ drill_height_cm  + species + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
 #summary(m.1)
 #check_model(m.1)
 Anova(m.1)
+# posthoc test for m.1
+emmeans(m.1, pairwise ~ species, adjust = "tukey")
 
 # model 2. relationship between area damage and tree species
-m.2 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + (1|tree_site_ID) + (1|site), REML = F, data = myrt)
+m.2 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + species + (1|tree_site_ID), REML = F, data = myrt)
 #summary(m.2)
 #check_model(m.2)
 Anova(m.2)
+# posthoc test for m.2
+emmeans(m.2, pairwise ~ species, adjust = "tukey")
 
 # model 3. relationship between proportion damage and height in tree by DBH + wd
 m.3 <- glmmTMB(linear_mean ~ drill_height_cm  + dbh_cm.x + wd + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
@@ -87,7 +91,7 @@ m.4 <- lmer(log(V_xsection_cm3_damaged) ~ drill_height_cm + dbh_cm.x + wd + (1|t
 Anova(m.4)
 ```
 
-Figure 2 plots
+Figure 4 plots (a-b is about species, c-d is about species for vertical positions, e-f is about traits)
 ```{r}
 # a) visualize species differences - proportion
 a <- ggplot(myrt, aes(x = species, y = linear_mean, fill = species)) + 
@@ -182,7 +186,7 @@ f <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = d
 (a+b)/(c+d)/(e+f) + plot_annotation(tag_levels = "a")
 ```
 
-Figure 3 
+Supplementary Figure 2
 Tapering - volume damaged using frustrum 
 ```{r}
 # generate list of all trees 
@@ -277,7 +281,7 @@ ggplot(df, aes(x = name, y = mean, fill = name))+
   theme(legend.position="none")
 ```
 
-Figure 4 models 
+Figure 5 models 
 ```{r}
 # merge in presence/absence data for termite/fire presence
 tree_damage <- tree_level_damage_myrt[c("tree_site_ID", "site", "termite_pres", "mound", "runway", "termite", "fire")]
@@ -312,7 +316,7 @@ Anova(mod.C)
 ggpredict(mod.C, terms = c("termite_pres"))  %>% plot(add.data = TRUE)
 ```
 
-Figure 4 plots
+Figure 5 plots
 ```{r}
 # Damage ~ species
 sp <- ggplot(frustrum, aes(x = species, y = mp_damaged_kg, fill = species))+ 
@@ -321,7 +325,7 @@ sp <- ggplot(frustrum, aes(x = species, y = mp_damaged_kg, fill = species))+
   scale_fill_manual(values = custom_colors)+
   scale_x_discrete(labels = c("C. clarksoniana", "E. cullenii", "M. stenostachya")) +
   xlab("") + 
-  ylab("Total damaged biomass in lower stem (kg)")+
+  ylab("Lower stem damaged biomass (kg)")+
   theme(legend.position = "none")
 
 # Damage ~ traits
@@ -349,14 +353,14 @@ tr <- ggplot(frustrum, aes(x = dbh_cm, y = log(mp_damaged_kg), color = wd)) +
   theme_classic() + 
   scale_color_manual(values = custom_colors_wd) +
   xlab("Tree DBH (cm)") + 
-  ylab("Total damaged biomass in lower stem (kg)")
+  ylab("Lower stem damaged biomass (kg)")
   
 # Damage ~ external factors
 term <- ggplot(frustrum, aes(x = termite_pres, y = mp_damaged_kg, fill = termite_pres))+ 
   geom_boxplot()+
   theme_classic() + 
   xlab("External termite presence") + 
-  ylab("Total damaged biomass in lower stem (kg)")+
+  ylab("Lower stem damaged biomass (kg)")+
   theme(legend.position = "none")+
   scale_fill_manual(values = colors)
 
@@ -364,14 +368,14 @@ fire <- ggplot(frustrum, aes(x = fire, y = mp_damaged_kg, fill = fire))+
   geom_boxplot()+
   theme_classic() + 
   xlab("External fire scarring") + 
-  ylab("Total damaged biomass in lower stem (kg)")+
+  ylab("Lower stem damaged biomass (kg)")+
   theme(legend.position = "none")+
   scale_fill_manual(values = colors) 
 
 (sp+tr) / (term+fire) + plot_annotation(tag_levels = "a")
 ```
 
-Figure 5 models 
+Figure 6 models 
 ```{r}
 # binomial model - define coding 
 myrt$termite_num <- ifelse(myrt$termite_pres == "Y", 1, 0)
@@ -390,11 +394,12 @@ myrt %>%
 
 contingency_table_term <- table(pp$species, pp$termite_num)
 fisher_test(contingency_table_term)
-pairwise_fisher_test(contingency_table_term) # correction - use bonferroni
-# There is a significant difference in termite presence across the species
+ft_term <- pairwise_fisher_test(contingency_table_term)
+p_values <- c(ft_term$p.adj)  # Add p-values from all comparisons
+p.adjust(p_values, method = "fdr") # adjust with fdr test
+# There is a significant difference in termite presence across the species. Euc-Mel is significantly different
 
 contingency_table_fire <- table(pp$species, pp$fire_num)
-chi_fire <- chisq.test(contingency_table_fire, correct = TRUE)
 fisher_test(contingency_table_fire)
 # There is no significant difference in fire presence across the species
 
@@ -420,7 +425,7 @@ Anova(fire_wd)
 ggpredict(fire_wd, terms = c("wd")) %>% plot(add.data = TRUE)
 ```
 
-Figure 5 plots
+Figure 6 plots
 ```{r}
 # external damage ~ species 
 fig5_a <- ggplot(pp, aes(x = species, fill = termite_num))+ 
@@ -560,6 +565,18 @@ ggplot(frustrum, aes(x = species, y = wd, fill = species))+
   theme(legend.position = "none")
 ```
 
+
+```{r}
+# how damaged are corymbia trees
+length(unique(myrt_c$tree_ID))
+# filter myrt_c for 115 ≤ drill_height_cm ≤ 125
+t <- myrt_c %>% filter(drill_height_cm >= 112 & drill_height_cm <= 136)
+mean(t$linear_mean)
+
+# damage by species 
+frustrum_agb %>% group_by(species) %>%
+  summarise(mean = mean(sp_damaged_kg)) -> mean_damaged
+```
 
 
 
