@@ -41,11 +41,6 @@ data configure
 # relevel species
 myrt$species <- fct_relevel(myrt$species, "Corymbia clarksoniana", "Eucalyptus cullenii", "Melaleuca stenostachya")
 
-# define area of slice 1cm thick at each measurement point 
-myrt$V_xsection_cm3 <- ((myrt$drill_dbh_cm/2)^2)*(pi)*(1)
-myrt$V_xsection_cm3_damaged <- myrt$V_xsection_cm3 * myrt$linear_mean
-myrt$V_xsection_cm3_damaged_revised <- ((myrt$drill_dbh_cm * myrt$linear_mean)/2)^2 * pi
-
 # set graphing parameters/colors
 v <- c(10, 25, 34)
 low <- "#a3dfba"
@@ -64,7 +59,7 @@ custom_colors_wd <- c("0.7405" = "#a3dfba", "0.8453" = "#347aa3", "0.977" = "#1f
 Figure 4 models 
 ```{r}
 # model 1. relationship between proportion damage and tree species
-m.1 <- glmmTMB(linear_mean ~ drill_height_cm  + species + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
+m.1 <- glmmTMB(area_mean ~ drill_height_cm  + species + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
 #summary(m.1)
 #check_model(m.1)
 Anova(m.1)
@@ -72,7 +67,7 @@ Anova(m.1)
 emmeans(m.1, pairwise ~ species, adjust = "tukey")
 
 # model 2. relationship between area damage and tree species
-m.2 <- lmer(log(V_xsection_cm3_damaged_revised) ~ drill_height_cm + species + (1|tree_site_ID), REML = F, data = myrt)
+m.2 <- lmer(log(V_xsection_cm3_damaged_area) ~ drill_height_cm + species + (1|tree_site_ID), REML = F, data = myrt)
 #summary(m.2)
 #check_model(m.2)
 Anova(m.2)
@@ -80,13 +75,13 @@ Anova(m.2)
 emmeans(m.2, pairwise ~ species, adjust = "tukey")
 
 # model 3. relationship between proportion damage and height in tree by DBH + wd
-m.3 <- glmmTMB(linear_mean ~ drill_height_cm  + dbh_cm.x + wd + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
+m.3 <- glmmTMB(area_mean ~ drill_height_cm  + dbh_cm + wd + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
 #summary(m.3)
 #check_model(m.3)
 Anova(m.3)
 
 # model 4. relationship between area damage and height in tree by DBH + wd
-m.4 <- lmer(log(V_xsection_cm3_damaged_revised) ~ drill_height_cm + dbh_cm.x + wd + (1|tree_site_ID) + (1|site), REML = F, data = myrt)
+m.4 <- lmer(log(V_xsection_cm3_damaged_area) ~ drill_height_cm + dbh_cm + wd + (1|tree_site_ID) + (1|site), REML = F, data = myrt)
 #summary(m.4)
 #check_model(m.4)
 Anova(m.4)
@@ -95,7 +90,7 @@ Anova(m.4)
 Figure 4 plots (a-b is about species, c-d is about species for vertical positions, e-f is about traits)
 ```{r}
 # a) visualize species differences - proportion
-a <- ggplot(myrt, aes(x = species, y = linear_mean, fill = species)) + 
+a <- ggplot(myrt, aes(x = species, y = area_mean, fill = species)) + 
   geom_boxplot() +
   geom_point()+ 
   theme_classic() + 
@@ -107,7 +102,7 @@ a <- ggplot(myrt, aes(x = species, y = linear_mean, fill = species)) +
   scale_fill_manual(values = custom_colors)
 
 # b) visualize species differences - area
-b <- ggplot(myrt, aes(x = species, y = V_xsection_cm3_damaged_revised, fill = species)) + 
+b <- ggplot(myrt, aes(x = species, y = V_xsection_cm3_damaged_area, fill = species)) + 
   geom_boxplot() +
   geom_point()+ 
   theme_classic() + 
@@ -119,11 +114,7 @@ b <- ggplot(myrt, aes(x = species, y = V_xsection_cm3_damaged_revised, fill = sp
   scale_fill_manual(values = custom_colors)
 
 # c) relationship between proportion damage and tree species at different heights
-prop1 <- ggpredict(m.1, terms = c("drill_height_cm", "species")) 
-plot(prop1, add.data = TRUE)+
-   labs(x = "Drill height (cm)", y = "Proportion damaged", title = "Predicted proportion damage")
-
-c <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean, color = species)) + 
+c <- ggplot(myrt, aes(x = drill_height_cm, y = area_mean, color = species)) + 
   geom_jitter() +
   theme_classic() + 
   xlab("Drill height (cm)") + 
@@ -136,7 +127,7 @@ area <- ggpredict(m.2, terms = c("drill_height_cm", "species"))
 plot(area, add.data = TRUE)+
    labs(x = "Drill height (cm)", y = "Absolute damaged area (cm2)", title = "Predicted absoute area damage") 
 
-d <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged_revised, color = species)) +
+d <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged_area, color = species)) +
   geom_jitter() +
   geom_line(aes(x=x, y=predicted), data=filter(area, group=='Corymbia clarksoniana'), 
             inherit.aes=FALSE, colour= h) + 
@@ -156,14 +147,16 @@ d <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged_revised, c
   scale_color_manual(values = custom_colors)
 
 # e) 
-e <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean)) + 
+e <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean, colour = dbh_cm)) + 
   geom_jitter() +
   theme_classic() + 
   xlab("Drill height (cm)") + 
-  ylab("Proportion damaged") 
+  ylab("Proportion damaged") +
+  scale_colour_gradientn(colours = c("#a3dfba", "#347aa3", "#1f1120"))
+
 
 # f) relationship between area damage and height in tree by size 
-area <- ggpredict(m.4, terms = c("drill_height_cm [all]", "dbh_cm.x [v]"), back.transform = TRUE) # %>% plot(add.data = TRUE)
+area <- ggpredict(m.4, terms = c("drill_height_cm [all]", "dbh_cm [v]"), back.transform = TRUE) # %>% plot(add.data = TRUE)
 
 f <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = dbh_cm.x)) +
   geom_jitter() +
@@ -190,6 +183,12 @@ f <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = d
 Supplementary Figure 2
 Tapering - volume damaged using frustrum 
 ```{r}
+# generate list of all trees 
+ids <- unique(myrt$tree_site_ID)
+
+# remove STCK-1 from ids
+ids <- ids[!ids %in% "STCK-1"]
+
 # SINGLEPOINT damage estimate (from residrill closest to DBH_)
 dbh_resi <- myrt[myrt$drill_height_cm > 113 & myrt$drill_height_cm < 136, ]
 missing_elements <- ids[!ids %in% dbh_resi$tree_site_ID]
@@ -205,16 +204,8 @@ x <- dbh_resi_merge$drill_ID
 myrt$closest_dbh <- ifelse(myrt$drill_ID %in% x, "Y", "N")
 
 # area of damage at dbh 
-myrt$dbh_damage_area_cm2 <- ifelse(myrt$closest_dbh == "Y", 
-                                   ((myrt$drill_dbh_cm * myrt$linear_mean)/2)^2 * pi, 
-                                   NA)
+myrt$dbh_damage_area_cm2 <- ifelse(myrt$closest_dbh == "Y", (((myrt$drill_dbh_cm/2)^2)*pi) * myrt$area_mean, NA)
   
-# generate list of all trees 
-ids <- unique(myrt$tree_site_ID)
-
-# remove STCK-1 from ids
-ids <- ids[!ids %in% "STCK-1"]
-
 # function that calculates undamaged frustrum volume 
 frus_ud <- function(x){
   ID <- unique(x$tree_site_ID)
@@ -235,22 +226,23 @@ frus_d <- function(x){
   d1 <- min(x$drill_height_cm) 
   d4 <- max(x$drill_height_cm)
   L <- d4 - d1
-  A1 <- x$V_xsection_cm3_damaged_revised[x$drill_height_cm == d1]
-  A4 <- x$V_xsection_cm3_damaged_revised[x$drill_height_cm == d4]
+  A1 <- x$V_xsection_cm3_damaged_area[x$drill_height_cm == d1]
+  A4 <- x$V_xsection_cm3_damaged_area[x$drill_height_cm == d4]
   V <- (L/3) * (A1 + sqrt(A1 * A4) + A4)
   
   output <- data.frame(tree_site_ID = ID, frus_damage_cm3 = V)
   return(output)
 }
 
+# column of damage from assuming constant value based on DBH 
+x <- myrt %>% filter(tree_site_ID == "STCK-10")
 frus_d_nt <- function(x){
   ID <- unique(x$tree_site_ID)
   d1 <- min(x$drill_height_cm)
   d4 <- max(x$drill_height_cm)
   L <- d4 - d1
   A1 <- x$dbh_damage_area_cm2[x$closest_dbh == "Y"]
-  A4 <- x$dbh_damage_area_cm2[x$closest_dbh == "Y"]
-  V <- (L/3) * (A1 + sqrt(A1 * A4) + A4)
+  V <- L * (A1)
 
   output <- data.frame(tree_site_ID = ID, frus_damage_cm3_nt = V)
   return(output)
@@ -293,7 +285,7 @@ qqline(differences, col = "blue")
 shapiro.test(differences) # breaks normality assumption 
 
 # nonparametric t-test 
-t <- wilcox.test(frustrum$sp_damaged_kg, frustrum$mp_damaged_kg, paired = TRUE)
+t <- wilcox.test(frustrum$sp_damaged_kg, frustrum$mp_damaged_kg, paired = TRUE) # no difference between groups
 
 # visualization 
 frustrum_agb_long %>% group_by(name) %>%
@@ -313,7 +305,7 @@ Figure 5 models
 ```{r}
 # merge in presence/absence data for termite/fire presence
 tree_damage <- tree_level_damage_myrt[c("tree_site_ID", "site", "termite_pres", "mound", "runway", "termite", "fire")]
-frustrum <- left_join(frustrum_agb, tree_damage, by = c("tree_site_ID", "site"))
+frustrum <- left_join(frustrum, tree_damage, by = c("tree_site_ID", "site"))
 
 # Damage ~ species
 mod.A <- lmer(log(mp_damaged_kg) ~ species + (1|site), REML = F, data = frustrum)
@@ -321,12 +313,7 @@ Anova(mod.A)
 # check_model(mod.A)
 ggpredict(mod.A, terms = c("species"))  %>% plot(add.data = TRUE)
 
-# posthoc pairwise tukey HSD to determine what species had differences
-x <- emmeans(mod.A, ~species)
-y <- pairs(x, adjust="tukey")
-
-# post hoc test for which species are different
-# estimated marginal means
+# post hoc test for which species are different - estimated marginal means
 emms <- emmeans(mod.A, ~ species)
 pairwise_comparisons_tukey <- pairs(emms, adjust = "tukey")
 summary(pairwise_comparisons_tukey)
@@ -414,7 +401,7 @@ myrt$fire_num <- ifelse(myrt$fire == "Y", as.integer(1), as.integer(0))
 
 myrt %>%
   group_by(tree_site_ID, species, site) %>%
-  distinct(dbh_cm.x, wd, fire_num, termite_num, mound_num, runway_num, termitesampled_num)-> pp
+  distinct(dbh_cm, wd, fire_num, termite_num, mound_num, runway_num, termitesampled_num)-> pp
 
 # external damage ~ species (chi square)
 #pp$termite_num <- as.factor(pp$termite_num)
@@ -432,20 +419,20 @@ fisher_test(contingency_table_fire)
 # There is no significant difference in fire presence across the species
 
 # external damage ~ traits 
-term_dbh <- glm(termite_num ~ dbh_cm.x, data = pp, family = binomial(logit))
+term_dbh <- glm(termite_num ~ dbh_cm, data = pp, family = binomial(logit))
 #summary(term_dbh)
 Anova(term_dbh)
-ggpredict(term_dbh, terms = c("dbh_cm.x"))  %>% plot(add.data = TRUE)
+ggpredict(term_dbh, terms = c("dbh_cm"))  %>% plot(add.data = TRUE)
 
 term_wd <- glm(termite_num ~ wd , data = pp, family = binomial("logit"))
 #summary(term_wd)
 Anova(term_wd)
 ggpredict(term_wd, terms = c("wd")) %>% plot(add.data = TRUE)
 
-fire_dbh <- glm(fire_num ~ dbh_cm.x, data = pp, family = binomial(logit))
+fire_dbh <- glm(fire_num ~ dbh_cm, data = pp, family = binomial(logit))
 #summary(fire_dbh)
 Anova(fire_dbh)
-ggpredict(fire_dbh, terms = c("dbh_cm.x"))  %>% plot(add.data = TRUE)
+ggpredict(fire_dbh, terms = c("dbh_cm"))  %>% plot(add.data = TRUE)
 
 fire_wd <- glm(fire_num ~ wd , data = pp, family = binomial("logit"))
 summary(fire_wd)
@@ -593,7 +580,6 @@ ggplot(frustrum, aes(x = species, y = wd, fill = species))+
   theme(legend.position = "none")
 ```
 
-
 ```{r}
 # how damaged are corymbia trees
 length(unique(myrt_c$tree_ID))
@@ -605,6 +591,91 @@ mean(t$linear_mean)
 frustrum_agb %>% group_by(species) %>%
   summarise(mean = mean(sp_damaged_kg)) -> mean_damaged
 ```
+
+look at individual stem tapering 
+```{r}
+myrt %>% group_by(tree_site_ID) %>% 
+  summarise(min_height = min(drill_height_cm), 
+            max_height = max(drill_height_cm), 
+            low_diam = drill_dbh_cm[which.min(drill_height_cm)],
+            high_diam = drill_dbh_cm[which.max(drill_height_cm)], 
+            tree_dbh = dbh_cm.x[1], 
+            species = species[1]) %>%
+  pivot_longer(
+    cols = c(low_diam, high_diam), 
+    names_to = "diameter_type", 
+    values_to = "diameter") %>%
+  pivot_longer(
+    cols = c(min_height, max_height),     # Second pivot for diameter
+    names_to = "height_type",
+    values_to = "height") -> taper
+  
+# keep rows that have diameter_type = low_diam, height_type = min_height OR diameter_type = high_diam, height_type = max_height
+taper <- taper %>% filter(diameter_type == "low_diam" & height_type == "min_height" | diameter_type == "high_diam" & height_type == "max_height")
+
+# filter out STCK-1 (only one entry)
+taper <- taper %>% filter(tree_site_ID != "STCK-1")
+
+# height type to factor
+taper$height_type <- as.factor(taper$height_type)
+
+ggplot(taper, aes(x = as.factor(height_type), y = diameter))+
+  geom_boxplot()+
+  theme_classic()+
+  facet_wrap(~species) 
+
+ggplot(taper, aes(x = height, y = diameter, colour = tree_site_ID))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  theme_classic()+ 
+  theme(legend.position = "none")+
+  facet_wrap(~species) 
+
+# is there a significant relationship between height and diameter
+mod <- lmer(diameter ~ as.factor(height_type) + (1|tree_site_ID), data = taper)
+summary(mod)
+Anova(mod)
+
+# consider all points rather than just the min and max
+ggplot(myrt, aes(x = drill_height_cm, y = drill_dbh_cm, colour = tree_site_ID))+
+  geom_point()+
+  geom_smooth(method = "lm", se = F)+
+  theme_classic()+
+  theme(legend.position = "none")+
+  facet_wrap(~species) 
+
+mod <- lmer(drill_dbh_cm ~ drill_height_cm + species + (1|tree_site_ID), data = myrt)
+summary(mod)
+Anova(mod)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

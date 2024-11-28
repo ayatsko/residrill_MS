@@ -100,6 +100,12 @@ myrt$wd <- ifelse(myrt$species == "Melaleuca stenostachya", 0.7405, myrt$wd)
 myrt$wd <- ifelse(myrt$species == "Eucalyptus cullenii", 0.977, myrt$wd)
 myrt$wd <- ifelse(myrt$species == "Corymbia clarksoniana", 0.8453, myrt$wd)
 
+# calculate damage area 
+myrt$V_xsection_cm3 <- ((myrt$drill_dbh_cm/2)^2)*(pi)*(1)
+myrt$V_xsection_cm3_damaged <- myrt$V_xsection_cm3 * myrt$linear_mean
+myrt$V_xsection_cm3_damaged_linear <- ((myrt$drill_dbh_cm * myrt$linear_mean)/2)^2 * pi
+myrt$V_xsection_cm3_damaged_area <- myrt$V_xsection_cm3 * myrt$area_mean
+
 # export working df 
 # save(myrt, file="/Users/abbeyyatsko/Desktop/repos/residrill_MS/R/Rdata/myrt.RData")
 ```
@@ -133,6 +139,22 @@ plot(sma)
 plot(sma, which = "residual") 
 abline(0, 0)
 
-# linear and area based methods significantly correlate, therefore can look at just one?
+# test if the slope is equal to 1
+slope_test <- slope.test(x = myrt$linear_mean, y = myrt$area_mean, test.value = 1)
+
+# linear and area based methods significantly correlate, therefore can look at just one
+# the correlation is not 1:1, as the slope is 1.14 
+# as linear_mean increases, area_mean tends to increase proportionally, though the relationship is slightly steeper than a one-to-one ratio
+# from the slope_test, the slope is significantly different from 1
 ```
+
+
+
+
+
+
+
+
+
+
 
