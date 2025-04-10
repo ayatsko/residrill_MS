@@ -59,7 +59,7 @@ custom_colors_wd <- c("0.7405" = "#a3dfba", "0.8453" = "#347aa3", "0.977" = "#1f
 Figure 4 models 
 ```{r}
 # model 1. relationship between proportion damage and tree species
-m.1 <- glmmTMB(area_mean ~ drill_height_cm  + species + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
+m.1 <- glmmTMB(area_mean ~ drill_height_cm  + species + (1|tree_site_ID) + (1|site), myrt, family = beta_family(link = "logit"))
 #summary(m.1)
 #check_model(m.1)
 Anova(m.1)
@@ -75,7 +75,7 @@ Anova(m.2)
 emmeans(m.2, pairwise ~ species, adjust = "tukey")
 
 # model 3. relationship between proportion damage and height in tree by DBH + wd
-m.3 <- glmmTMB(area_mean ~ drill_height_cm  + dbh_cm + wd + (1|tree_site_ID) + (1|site), myrt, family=list(family="beta",link="logit"))
+m.3 <- glmmTMB(area_mean ~ drill_height_cm  + dbh_cm + wd + (1|tree_site_ID) + (1|site), myrt, family = beta_family(link = "logit"))
 #summary(m.3)
 #check_model(m.3)
 Anova(m.3)
@@ -127,57 +127,122 @@ area <- ggpredict(m.2, terms = c("drill_height_cm", "species"))
 plot(area, add.data = TRUE)+
    labs(x = "Drill height (cm)", y = "Absolute damaged area (cm2)", title = "Predicted absoute area damage") 
 
-d <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged_area, color = species)) +
+d <-ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged_area, color = species)) +
   geom_jitter() +
-  geom_line(aes(x=x, y=predicted), data=filter(area, group=='Corymbia clarksoniana'), 
-            inherit.aes=FALSE, colour= h) + 
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='Corymbia clarksoniana'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = h) +
-  geom_line(aes(x=x, y=predicted), data=filter(area, group =='Eucalyptus cullenii'), 
-            inherit.aes=FALSE, colour= m) +
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='Eucalyptus cullenii'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = m)+
-  geom_line(aes(x=x, y=predicted), data=filter(area, group =='Melaleuca stenostachya'), 
-            inherit.aes=FALSE, colour= l) +
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='Melaleuca stenostachya'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = l)+
-  theme_classic() + 
-  xlab("Drill height (cm)") + 
-  ylab("Damaged area (cm2)")+
-  scale_color_manual(values = custom_colors)
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == 'Corymbia clarksoniana'),
+    inherit.aes = FALSE,
+    color = h
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == 'Corymbia clarksoniana'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = h
+  ) +
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == 'Eucalyptus cullenii'),
+    inherit.aes = FALSE,
+    color = m
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == 'Eucalyptus cullenii'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = m
+  ) +
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == 'Melaleuca stenostachya'),
+    inherit.aes = FALSE,
+    color = l
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == 'Melaleuca stenostachya'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = l
+  ) +
+  theme_classic() +
+  xlab("Drill height (cm)") +
+  ylab("Damaged area (cm²)") +
+  scale_color_manual(values = custom_colors) +
+  theme(legend.position = "none")
 
 # e) 
-e <- ggplot(myrt, aes(x = drill_height_cm, y = linear_mean, colour = dbh_cm)) + 
+e <- ggplot(myrt, aes(x = drill_height_cm, y = area_mean, colour = dbh_cm)) + 
   geom_jitter() +
   theme_classic() + 
   xlab("Drill height (cm)") + 
   ylab("Proportion damaged") +
-  scale_colour_gradientn(colours = c("#a3dfba", "#347aa3", "#1f1120"))
+  scale_colour_gradientn(colours = c("#a3dfba", "#347aa3", "#1f1120"))+
+  theme(legend.position = "none")
 
 
 # f) relationship between area damage and height in tree by size 
-area <- ggpredict(m.4, terms = c("drill_height_cm [all]", "dbh_cm [v]"), back.transform = TRUE) # %>% plot(add.data = TRUE)
+area <- ggpredict(m.4, terms = c("drill_height_cm [all]", "dbh_cm [v]"), back.transform = TRUE) #%>% plot(add.data = TRUE)
 
-f <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged, color = dbh_cm.x)) +
-  geom_jitter() +
-  scale_colour_gradient2(low=low, mid=mid, midpoint = 30 , high=high, name ='DBH') +
-  geom_line(aes(x=x, y=predicted), data=filter(area, group=='10'), 
-            inherit.aes=FALSE, colour= low) + 
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='10'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = low) +
-  geom_line(aes(x=x, y=predicted), data=filter(area, group =='25'), 
-            inherit.aes=FALSE, colour= mid) +
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='25'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = mid)+
-  geom_line(aes(x=x, y=predicted), data=filter(area, group =='34'), 
-            inherit.aes=FALSE, colour= high) +
-  geom_ribbon(aes(x=x, ymin=conf.low, ymax=conf.high), data=filter(area, group=='34'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = high)+
-  theme_classic() + 
-  xlab("Drill height (cm)") + 
-  ylab("Damaged area (cm2)")
+f <- ggplot(myrt, aes(x = drill_height_cm, y = V_xsection_cm3_damaged)) +
+  geom_jitter(aes(color = dbh_cm)) +
+  scale_colour_gradient2(
+    low = low,
+    mid = mid,
+    midpoint = 30,
+    high = high,
+    name = 'DBH'
+  ) +
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == '10'),
+    inherit.aes = FALSE,
+    colour = low
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == '10'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = low
+  ) +
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == '25'),
+    inherit.aes = FALSE,
+    colour = mid
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == '25'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = mid
+  ) +
+  geom_line(
+    aes(x = x, y = predicted),
+    data = filter(area, group == '34'),
+    inherit.aes = FALSE,
+    colour = high
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = conf.low, ymax = conf.high),
+    data = filter(area, group == '34'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = high
+  ) +
+  theme_classic() +
+  xlab("Drill height (cm)") +
+  ylab("Damaged area (cm²)") +
+  theme(legend.position = "none")
 
-(a+b)/(c+d)/(e+f) + plot_annotation(tag_levels = "a")
+ggarrange(b, a, d, c, f, e, ncol = 2, nrow = 3)
+# plot <- (a+b)/(c+d)/(e+f) 
+# out <- plot + plot_annotation(tag_levels = "a")
 ```
 
 Supplementary Figure 2
@@ -322,7 +387,7 @@ summary(pairwise_comparisons_tukey)
 mod.B <- lmer(log(mp_damaged_kg) ~ dbh_cm + wd + (1|site), REML = F, data = frustrum)
 Anova(mod.B)
 #check_model(mod.B)
-dam_dbh <- ggpredict(mod.B, terms = c("dbh_cm", "wd"))# %>% plot(add.data = TRUE)
+dam_dbh <- ggpredict(mod.B, terms = c("dbh_cm", "wd"), back.transform = TRUE)# %>% plot(add.data = TRUE)
 
 # Damage ~ external factors
 mod.C <- lmer(log(mp_damaged_kg) ~ fire*termite_pres + (1|site), data = frustrum)
@@ -345,33 +410,58 @@ sp <- ggplot(frustrum, aes(x = species, y = mp_damaged_kg, fill = species))+
 
 # Damage ~ traits
 frustrum$wd <- as.factor(frustrum$wd)
-tr <- ggplot(frustrum, aes(x = dbh_cm, y = log(mp_damaged_kg), color = wd)) +
-  geom_jitter() +
-  geom_line(aes(x=x, y=log(predicted)), 
-            data=filter(dam_dbh, group=='0.7405'), 
-            inherit.aes=FALSE, colour= low) + 
-  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
-              data=filter(dam_dbh, group=='0.7405'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = low)+
-  geom_line(aes(x=x, y=log(predicted)), 
-            data=filter(dam_dbh, group=='0.8453'), 
-            inherit.aes=FALSE, colour= mid) + 
-  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
-              data=filter(dam_dbh, group=='0.8453'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = mid) +
-  geom_line(aes(x=x, y=log(predicted)), 
-            data=filter(dam_dbh, group=='0.977'), 
-            inherit.aes=FALSE, colour= high) + 
-  geom_ribbon(aes(x=x, ymin=log(conf.low), ymax=log(conf.high)), 
-              data=filter(dam_dbh, group=='0.977'), 
-              inherit.aes=FALSE,  alpha=0.2, fill = high) +
-  theme_classic() + 
+dam_dbh <- ggpredict(mod.B, terms = c("dbh_cm", "wd"), back.transform = TRUE)# %>% plot(add.data = TRUE)
+
+tr <- ggplot(frustrum, aes(x = dbh_cm, y = log(mp_damaged_kg))) +
+  geom_jitter(aes(color = wd)) +
+  geom_line(
+    aes(x = x, y = log(predicted)),
+    data = filter(dam_dbh, group == '0.7405'),
+    inherit.aes = FALSE,
+    colour = low
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = log(conf.low), ymax = log(conf.high)),
+    data = filter(dam_dbh, group == '0.7405'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = low
+  ) +
+  geom_line(
+    aes(x = x, y = log(predicted)),
+    data = filter(dam_dbh, group == '0.8453'),
+    inherit.aes = FALSE,
+    colour = mid
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = log(conf.low), ymax = log(conf.high)),
+    data = filter(dam_dbh, group == '0.8453'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = mid
+  ) +
+  geom_line(
+    aes(x = x, y = log(predicted)),
+    data = filter(dam_dbh, group == '0.977'),
+    inherit.aes = FALSE,
+    colour = high
+  ) +
+  geom_ribbon(
+    aes(x = x, ymin = log(conf.low), ymax = log(conf.high)),
+    data = filter(dam_dbh, group == '0.977'),
+    inherit.aes = FALSE,
+    alpha = 0.2,
+    fill = high
+  ) +
+  theme_classic() +
   scale_color_manual(values = custom_colors_wd) +
-  xlab("Tree DBH (cm)") + 
-  ylab("Lower stem damaged biomass (kg)")
-  
+  xlab("Tree DBH (cm)") +
+  ylab("Lower stem damaged biomass (kg)") +
+  theme(legend.position = "none")
+
+
 # Damage ~ external factors
-term <- ggplot(frustrum, aes(x = termite_pres, y = mp_damaged_kg, fill = termite_pres))+ 
+term <- ggplot(frustrum, aes(x = termite_pres.x, y = mp_damaged_kg, fill = termite_pres.x))+ 
   geom_boxplot()+
   theme_classic() + 
   xlab("External termite presence") + 
@@ -379,7 +469,7 @@ term <- ggplot(frustrum, aes(x = termite_pres, y = mp_damaged_kg, fill = termite
   theme(legend.position = "none")+
   scale_fill_manual(values = colors)
 
-fire <- ggplot(frustrum, aes(x = fire, y = mp_damaged_kg, fill = fire))+ 
+fire <- ggplot(frustrum, aes(x = fire.x, y = mp_damaged_kg, fill = fire.x))+ 
   geom_boxplot()+
   theme_classic() + 
   xlab("External fire scarring") + 
@@ -387,7 +477,7 @@ fire <- ggplot(frustrum, aes(x = fire, y = mp_damaged_kg, fill = fire))+
   theme(legend.position = "none")+
   scale_fill_manual(values = colors) 
 
-(sp+tr) / (term+fire) + plot_annotation(tag_levels = "a")
+ggarrange(sp, tr, term, fire, ncol = 2, nrow = 2)
 ```
 
 Figure 6 models 
@@ -488,34 +578,7 @@ fire_wd <- ggplot(pp, aes(x = wd, y =  fire_num))+
 fig5_a + fig5_b + term_dbh + term_wd + patchwork::plot_annotation(tag_levels = "a") 
 ```
 
-CHI SQUARE BULLSHIT # is this even needed? 
-```{r}
-perform_chi_squared_test <- function(species_name, data) {
-  # Filter data for the species
-  species_data <- data %>% filter(species == species_name)
-  
-  # Create a contingency table
-  contingency_table <- table(species_data$termite_num)
-  
-  # Perform Chi-squared test
-  chi_squared_test <- chisq.test(contingency_table)
-  
-  return(chi_squared_test)
-}
-
-species_list <- unique(pp$species)
-chi_squared_results_termite <- lapply(species_list, perform_chi_squared_test, data = pp)
-names(chi_squared_results_termite) <- species_list
-chi_squared_results_termite
-
-chi_squared_results_fire <- lapply(species_list, perform_chi_squared_test, data = pp)
-names(chi_squared_results_fire) <- species_list
-chi_squared_results_fire
-
-
-```
-
-Supplementary Table 1. Site description, stem percentages, and species biomass
+Summary data: Site description, stem percentages, and species biomass
 ```{r}
 # station creek biomass summary
 stck_agb <- agb[agb$site == "station_creek",]
@@ -543,24 +606,7 @@ pnw_stems %>% group_by(species) %>%
             stem_perc = (count/49)*100) -> pnw_out
 ```
 
-Supplementary Table 2. Sample sizes for residrill measurements
-
-Supplementary Figure 1, Table E
-```{r}
-# relationship between dbh and wd 
-# model
-mod3 <- lm(dbh_cm.x ~ wd, data = pp)
-summary(mod3)
-
-ggpredict(mod3, terms = c("wd")) %>% plot(add.data = TRUE)
-
-wd <- ggplot(pp,aes(x= wd, y = dbh_cm.x, colour= species))+
-  geom_point()+
-  geom_smooth(method = "lm")+
-  theme_classic()
-```
-
-Supplementary something. size ~ species, wd ~ species
+Supplementary Figure 3. size ~ species
 ```{r}
 ggplot(frustrum, aes(x = species, y = dbh_cm, fill = species))+
   geom_boxplot()+
@@ -573,14 +619,27 @@ ggplot(frustrum, aes(x = species, y = dbh_cm, fill = species))+
 anova_result <- aov(dbh_cm ~ species, data = frustrum)
 summary(anova_result)
 TukeyHSD(anova_result)
+```
+
+Extra materials
+```{r}
+# relationship between dbh and wd 
+# model
+mod3 <- lm(dbh_cm.x ~ wd, data = pp)
+summary(mod3)
+
+ggpredict(mod3, terms = c("wd")) %>% plot(add.data = TRUE)
+
+wd <- ggplot(pp,aes(x= wd, y = dbh_cm.x, colour= species))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  theme_classic()
 
 ggplot(frustrum, aes(x = species, y = wd, fill = species))+
   geom_boxplot()+
   theme_classic()+
   theme(legend.position = "none")
-```
 
-```{r}
 # how damaged are corymbia trees
 length(unique(myrt_c$tree_ID))
 # filter myrt_c for 115 ≤ drill_height_cm ≤ 125
@@ -592,7 +651,7 @@ frustrum_agb %>% group_by(species) %>%
   summarise(mean = mean(sp_damaged_kg)) -> mean_damaged
 ```
 
-look at individual stem tapering 
+Individual stem tapering 
 ```{r}
 myrt %>% group_by(tree_site_ID) %>% 
   summarise(min_height = min(drill_height_cm), 
@@ -648,35 +707,3 @@ mod <- lmer(drill_dbh_cm ~ drill_height_cm + species + (1|tree_site_ID), data = 
 summary(mod)
 Anova(mod)
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
